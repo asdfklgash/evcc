@@ -16,6 +16,7 @@ import (
 
 var references struct {
 	meter, charger, vehicle, circuit, tariff, curtailer []string
+	consumerMeter                                       []string // subset of meter
 }
 
 func collectRefs(conf globalconfig.All) error {
@@ -85,6 +86,7 @@ func collectSiteRefs(conf globalconfig.All) error {
 	references.meter = append(references.meter, refs.Meters.ExtMetersRef...)
 	references.meter = append(references.meter, refs.Meters.AuxMetersRef...)
 	references.meter = append(references.meter, refs.Meters.ConsumerMetersRef...)
+	references.consumerMeter = append(references.consumerMeter, refs.Meters.ConsumerMetersRef...)
 	references.curtailer = append(references.curtailer, refs.Curtailers...)
 
 	// append devices from settings
@@ -96,6 +98,10 @@ func collectSiteRefs(conf globalconfig.All) error {
 		if v, err := settings.String(key); err == nil && v != "" {
 			references.meter = append(references.meter, strings.Split(v, ",")...)
 		}
+	}
+
+	if v, err := settings.String(keys.ConsumerMeters); err == nil && v != "" {
+		references.consumerMeter = append(references.consumerMeter, strings.Split(v, ",")...)
 	}
 
 	if v, err := settings.String(keys.Curtailers); err == nil && v != "" {

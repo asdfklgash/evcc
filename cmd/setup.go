@@ -362,6 +362,29 @@ func configurableInstance[T any](typ string, conf *config.Config, newFromConf ne
 	return err
 }
 
+// meterFromConfig returns the meter factory for the named meter.
+// Consumer meters are only monitored and must not prevent startup when unavailable.
+func meterFromConfig(name string) newFromConfFunc[api.Meter] {
+	if !slices.Contains(references.consumerMeter, name) {
+		return meter.NewFromConfig
+	}
+
+	return func(ctx context.Context, typ string, other map[string]any) (api.Meter, error) {
+		instance, err := meter.NewFromConfig(ctx, typ, other)
+		if err != nil {
+			if _, ok := errors.AsType[*util.ConfigError](err); ok {
+				return nil, err
+			}
+
+			// wrap non-config consumer meter errors to prevent fatals
+			log.ERROR.Printf("creating meter %s failed: %v", name, err)
+			instance = meter.NewWrapper(ctx, typ, other, err)
+		}
+
+		return instance, nil
+	}
+}
+
 func configureMeters(static []config.Named, names ...string) error {
 	var eg errgroup.Group
 
@@ -380,7 +403,7 @@ func configureMeters(static []config.Named, names ...string) error {
 		}
 
 		eg.Go(func() error {
-			return staticInstance("meter", cc, meter.NewFromConfig, config.Meters())
+			return staticInstance("meter", cc, meterFromConfig(cc.Name), config.Meters())
 		})
 	}
 
@@ -399,7 +422,7 @@ func configureMeters(static []config.Named, names ...string) error {
 				return nil
 			}
 
-			return configurableInstance("meter", &conf, meter.NewFromConfig, config.Meters())
+			return configurableInstance("meter", &conf, meterFromConfig(cc.Name), config.Meters())
 		})
 	}
 
