@@ -671,6 +671,11 @@ func (site *Site) collectMeters(key string, meters []config.Device[api.Meter]) [
 			Icon:  props.Icon,
 		}
 
+		// disabled while running (nil instance), not polled until restart
+		if meter == nil {
+			return
+		}
+
 		// power
 		var b bytes.Buffer
 		power, err := backoff.RetryWithData(meter.CurrentPower, modbus.Backoff())
@@ -941,6 +946,10 @@ func weightedSumOfSocs(mm []types.Measurement) float64 {
 // addMeterEnergy persists per-meter energy (positive power = import).
 func (site *Site) addMeterEnergy(meters []config.Device[api.Meter], mm []types.Measurement) {
 	for i, dev := range meters {
+		if dev.Instance() == nil {
+			continue
+		}
+
 		ref := dev.Config().Name
 		c, ok := site.collectors[ref]
 		if !ok {
@@ -1012,6 +1021,11 @@ func (site *Site) updateGridMeter() error {
 	mm := types.Measurement{Name: site.gridMeter.Config().Name}
 
 	meter := site.gridMeter.Instance()
+
+	// disabled while running: don't control with stale grid power
+	if meter == nil {
+		return errors.New("grid meter disabled")
+	}
 
 	if res, err := backoff.RetryWithData(meter.CurrentPower, modbus.Backoff()); err == nil {
 		mm.Power = res

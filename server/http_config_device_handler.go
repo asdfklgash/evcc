@@ -435,6 +435,14 @@ func newDeviceHandler(site site.API, authObject auth.Auth) http.HandlerFunc {
 }
 
 func updateDevice[T any](ctx context.Context, id int, class templates.Class, req configReq, newFromConf newFromConfFunc[T], h config.Handler[T], force bool) error {
+	// disabled devices are not created (nil instance), don't wait for unavailable devices
+	if req.Disable {
+		newFromConf = func(context.Context, string, map[string]any) (T, error) {
+			var zero T
+			return zero, nil
+		}
+	}
+
 	dev, instance, merged, err := deviceInstanceFromMergedConfig(ctx, id, class, req, newFromConf, h)
 	if err != nil {
 		// allow force-updating if merged config exists

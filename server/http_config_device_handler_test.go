@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -107,5 +109,68 @@ func TestDeviceConfigMapCustomYamlRedacted(t *testing.T) {
 		assert.Contains(t, conf["yaml"], "password: "+want)
 		assert.Contains(t, conf["yaml"], "maxPower: 2760")
 		assert.Equal(t, want, conf["password"])
+	}
+}
+
+type updateDeviceTestMeter struct{}
+
+func (updateDeviceTestMeter) CurrentPower() (float64, error) { return 0, nil }
+
+// TestUpdateDeviceDisable asserts that disabling does not create the device and leaves a nil (disabled) instance
+func TestUpdateDeviceDisable(t *testing.T) {
+	other := map[string]any{"template": "demo-meter", "usage": "charge", "power": 100}
+
+	tests := []struct {
+		name         string
+		disable      bool
+		force        bool
+		wantErr      bool
+		wantCreated  bool
+		wantDisabled bool // nil instance
+	}{
+		{name: "update fails", wantErr: true, wantCreated: true},
+		{name: "force update fails", force: true, wantCreated: true, wantDisabled: true},
+		{name: "disable", disable: true, force: true, wantDisabled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, db.NewInstance("sqlite", ":memory:"))
+			config.Reset()
+
+			conf, err := config.AddConfig(templates.Meter, other, config.WithProperties(config.Properties{Type: "template"}))
+			require.NoError(t, err)
+
+			running := new(updateDeviceTestMeter)
+			require.NoError(t, config.Meters().Add(config.NewConfigurableDevice(&conf, api.Meter(running))))
+
+			var created int
+			unavailable := func(context.Context, string, map[string]any) (api.Meter, error) {
+				created++
+				return nil, errors.New("unavailable")
+			}
+
+			req := configReq{Properties: config.Properties{Type: "template", Disable: tt.disable}, Other: other}
+			err = updateDevice(context.TODO(), conf.ID, templates.Meter, req, unavailable, config.Meters(), tt.force)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.wantCreated, created > 0, "device created")
+
+			dev, err := config.Meters().ByName(config.NameForID(conf.ID))
+			require.NoError(t, err)
+			if tt.wantDisabled {
+				assert.Nil(t, dev.Instance())
+			} else {
+				assert.Same(t, running, dev.Instance())
+			}
+
+			stored, err := config.ConfigByID(conf.ID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.disable, stored.Disable)
+		})
 	}
 }
